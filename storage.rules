@@ -1,0 +1,12 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /property_images/{allPaths=**} {
+      // Anyone can retrieve/view listed property images
+      allow read: if true;
+      
+      // Only authenticated users can write pictures
+      allow write: if request.auth != null;
+    }
+  }
+}
