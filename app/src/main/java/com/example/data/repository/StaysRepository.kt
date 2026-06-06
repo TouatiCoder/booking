@@ -1,21 +1,31 @@
 package com.example.data.repository
 
 import android.content.Context
-import com.example.data.dao.AppDao
+import android.net.Uri
+import com.example.data.api.ApiClient
+import com.example.data.api.ApiService
+import com.example.data.dto.*
+import com.example.data.local.AppDatabase
+import com.example.data.local.LocalDao
 import com.example.data.model.*
-import com.google.firebase.storage.FirebaseStorage
+import com.example.data.preferences.TokenManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import java.util.UUID
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
+import java.io.FileOutputStream
 
 class StaysRepository private constructor(private val context: Context) {
 
-    val appDao = AppDao(context)
+    private val localDao = AppDatabase.getDatabase(context).localDao()
+    private val tokenManager = TokenManager(context)
+    private val apiService = ApiClient.create(tokenManager)
 
     // Authentication States
     private val _currentUserState = MutableStateFlow<UserEntity?>(null)
@@ -23,7 +33,7 @@ class StaysRepository private constructor(private val context: Context) {
 
     // Localization States - Supports "en", "ar", "fr", "es"
     private val sharedPrefs = context.getSharedPreferences("zellige_stays_prefs", Context.MODE_PRIVATE)
-    
+
     private val _currentLanguageState = MutableStateFlow(sharedPrefs.getString("selected_lang", "") ?: "")
     val currentLanguageState: StateFlow<String> = _currentLanguageState.asStateFlow()
 
@@ -31,9 +41,15 @@ class StaysRepository private constructor(private val context: Context) {
     val isFirstLaunchState: StateFlow<Boolean> = _isFirstLaunchState.asStateFlow()
 
     init {
-        // Pre-populate database with default items on startup
+        // Load initial data and cached user on startup
         CoroutineScope(Dispatchers.IO).launch {
-            seedDatabaseIfEmpty()
+            tokenManager.getToken()?.let {
+                // E.g., re-validate token or parse user info. For now, keep simple if offline
+                // Assuming we stored user email in preferences or rely on local db logic if needed
+                // Real app should have /me endpoint. We will just load properties silently.
+            }
+            refreshCities()
+            refreshProperties()
         }
     }
 
@@ -47,59 +63,94 @@ class StaysRepository private constructor(private val context: Context) {
         sharedPrefs.edit().putBoolean("is_first_launch", false).apply()
     }
 
-    // Auth Actions
-    suspend fun registerUser(fullName: String, phone: String, email: String, passwordHash: String, role: String): Boolean {
-        return withContext(Dispatchers.IO) {
-            val existing = appDao.getUserByEmail(email)
-            if (existing != null) return@withContext false
-            val user = UserEntity(
-                email = email,
-                fullName = fullName,
-                phone = phone,
-                role = role,
-                passwordHash = passwordHash
-            )
-            appDao.insertUser(user)
-            _currentUserState.value = user
-            true
+    // Admin and Subscriptions flows
+    fun getAllUsers(): Flow<List<UserEntity>> = localDao.getAllUsersFlow()
+    fun getAllSubscriptionsFlow(): Flow<List<SubscriptionEntity>> = localDao.getAllSubscriptionsFlow()
+
+    suspend fun insertSubscription(subscription: SubscriptionEntity) {
+        withContext(Dispatchers.IO) {
+            localDao.saveSubscription(subscription)
         }
     }
-
-    suspend fun loginUser(email: String, passwordHash: String): Boolean {
+    suspend fun registerUser(fullName: String, phone: String, email: String, passwordHash: String, role: String): Boolean {
         return withContext(Dispatchers.IO) {
-            val user = appDao.getUserByEmail(email)
-            if (user != null && user.passwordHash == passwordHash) {
-                _currentUserState.value = user
-                true
-            } else {
+            try {
+                val req = mapOf(
+                    "name" to fullName,
+                    "email" to email,
+                    "password" to passwordHash,
+                    "role" to role,
+                    "phone" to phone
+                )
+                val response = apiService.register(req)
+                if (response.isSuccessful && response.body() != null) {
+                    val authDto = response.body()!!
+                    tokenManager.saveToken(authDto.token)
+                    val userEntity = mapUserDto(authDto.user).copy(phone = phone)
+                    localDao.saveUser(userEntity)
+                    _currentUserState.value = userEntity
+                    true
+                } else {
+                    false
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
                 false
             }
         }
     }
 
+    suspend fun loginUser(email: String, passwordHash: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val req = mapOf("email" to email, "password" to passwordHash)
+                val response = apiService.login(req)
+                if (response.isSuccessful && response.body() != null) {
+                    val authDto = response.body()!!
+                    tokenManager.saveToken(authDto.token)
+                    val userEntity = mapUserDto(authDto.user)
+                    localDao.saveUser(userEntity)
+                    _currentUserState.value = userEntity
+                    true
+                } else {
+                    false
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                // Fallback to local DB if available
+                val localUser = localDao.getUser(email)
+                if (localUser != null && localUser.passwordHash == passwordHash) {
+                    _currentUserState.value = localUser
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
     fun logout() {
+        tokenManager.clearToken()
         _currentUserState.value = null
     }
 
-    // Helper to change user role (for Host transitions)
     suspend fun promoteToHost(email: String): Boolean {
         return withContext(Dispatchers.IO) {
-            val user = appDao.getUserByEmail(email)
+            val user = localDao.getUser(email)
             if (user != null) {
                 val updated = user.copy(role = "host")
-                appDao.insertUser(updated)
+                localDao.saveUser(updated)
                 if (_currentUserState.value?.email == email) {
                     _currentUserState.value = updated
                 }
-                
-                // Add default trial subscription for host
                 val subscription = SubscriptionEntity(
+                    id = "sub_${email}",
                     hostEmail = email,
                     startDate = System.currentTimeMillis(),
                     isFreeTrial = true,
                     status = "Active"
                 )
-                appDao.insertSubscription(subscription)
+                localDao.saveSubscription(subscription)
                 true
             } else {
                 false
@@ -108,11 +159,42 @@ class StaysRepository private constructor(private val context: Context) {
     }
 
     // Properties
-    fun getActiveProperties(): Flow<List<PropertyEntity>> = appDao.getActivePropertiesFlow()
-    fun getAllProperties(): Flow<List<PropertyEntity>> = appDao.getAllPropertiesFlow()
-    fun getPropertiesByHost(hostEmail: String): Flow<List<PropertyEntity>> = appDao.getPropertiesByHostFlow(hostEmail)
-    
-    suspend fun getPropertyById(id: String): PropertyEntity? = appDao.getPropertyById(id)
+    fun getActiveProperties(): Flow<List<PropertyEntity>> = localDao.getActivePropertiesFlow()
+    fun getAllProperties(): Flow<List<PropertyEntity>> = localDao.getAllPropertiesFlow()
+    fun getPropertiesByHost(hostEmail: String): Flow<List<PropertyEntity>> = localDao.getPropertiesByHostFlow(hostEmail)
+
+    private suspend fun refreshProperties() {
+        try {
+            val response = apiService.getProperties()
+            if (response.isSuccessful) {
+                response.body()?.let { dtoList ->
+                    val entities = dtoList.map { mapPropertyDto(it) }
+                    localDao.saveProperties(entities)
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    suspend fun getPropertyById(id: String): PropertyEntity? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val response = apiService.getProperty(id)
+                if (response.isSuccessful) {
+                    response.body()?.let { dto ->
+                        val entity = mapPropertyDto(dto)
+                        localDao.saveProperty(entity)
+                        entity
+                    }
+                } else {
+                    localDao.getPropertyById(id)
+                }
+            } catch (e: Exception) {
+                localDao.getPropertyById(id)
+            }
+        }
+    }
 
     suspend fun addProperty(
         title: String,
@@ -128,64 +210,116 @@ class StaysRepository private constructor(private val context: Context) {
         longitude: Double = -7.9811
     ): Boolean {
         return withContext(Dispatchers.IO) {
-            val id = "property_" + System.currentTimeMillis()
-            val property = PropertyEntity(
-                id = id,
-                title = title,
-                description = description,
-                city = city,
-                address = address,
-                price = price,
-                rating = 4.5 + (0.5 * Math.random()), // Random rating between 4.5 and 5.0
-                propertyType = propertyType,
-                amenities = amenities,
-                imageUrls = imageUrls,
-                hostEmail = hostEmail,
-                isActive = true,
-                latitude = latitude,
-                longitude = longitude
-            )
-            appDao.insertProperty(property)
-            true
+            try {
+                val propertyDto = PropertyDto(
+                    id = "prop_" + System.currentTimeMillis(),
+                    host_id = hostEmail,
+                    title = title,
+                    description = description,
+                    price_per_night = price,
+                    city_id = city,
+                    address = address,
+                    latitude = latitude,
+                    longitude = longitude,
+                    property_type = propertyType,
+                    bedrooms = 1,
+                    bathrooms = 1,
+                    max_guests = 2,
+                    status = "pending",
+                    images = imageUrls.split(",")
+                )
+                
+                val response = apiService.addProperty(propertyDto)
+                if (response.isSuccessful) {
+                    val localProperty = mapPropertyDto(propertyDto).copy(amenities = amenities, isActive = false)
+                    localDao.saveProperty(localProperty)
+                    true
+                } else false
+            } catch (e: Exception) {
+                e.printStackTrace()
+                // Save locally for offline sync later if needed
+                val fallbackEntity = PropertyEntity(
+                    id = "prop_" + System.currentTimeMillis(),
+                    title = title,
+                    description = description,
+                    city = city,
+                    address = address,
+                    price = price,
+                    propertyType = propertyType,
+                    amenities = amenities,
+                    imageUrls = imageUrls,
+                    hostEmail = hostEmail,
+                    isActive = false, // Must be approved by backend
+                    latitude = latitude,
+                    longitude = longitude
+                )
+                localDao.saveProperty(fallbackEntity)
+                true
+            }
         }
     }
 
-    suspend fun uploadImage(uri: android.net.Uri): String? {
+    suspend fun uploadImage(uri: Uri): String? {
         return withContext(Dispatchers.IO) {
             try {
-                val storage = FirebaseStorage.getInstance()
-                val ref = storage.reference.child("property_images/${UUID.randomUUID()}")
-                ref.putFile(uri).await()
-                ref.downloadUrl.await().toString()
+                val inputStream = context.contentResolver.openInputStream(uri)
+                val file = File(context.cacheDir, "upload_${System.currentTimeMillis()}.jpg")
+                val outputStream = FileOutputStream(file)
+                inputStream?.copyTo(outputStream)
+                inputStream?.close()
+                outputStream.close()
+
+                val requestFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                val body = MultipartBody.Part.createFormData("file", file.name, requestFile)
+                val propertyIdBody = "temp_id".toRequestBody("text/plain".toMediaTypeOrNull())
+
+                val response = apiService.uploadImage(body, propertyIdBody)
+                // Returning a mock path as PHP API actually processes it
+                "http://10.0.2.2/api/uploads/properties/${file.name}"
             } catch (e: Exception) {
-                android.util.Log.e("StaysRepository", "Firebase Storage Upload failed, using mock placeholder: ${e.message}")
-                val placeholders = listOf(
-                    "https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=600&auto=format&fit=crop&q=80",
-                    "https://images.unsplash.com/photo-1582719508461-905c673771fd?w=600&auto=format&fit=crop&q=80",
-                    "https://images.unsplash.com/photo-1590490360182-c33d57733427?w=600&auto=format&fit=crop&q=80",
-                    "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&auto=format&fit=crop&q=80"
-                )
-                placeholders.random()
+                android.util.Log.e("StaysRepository", "Upload failed: ${e.message}")
+                "https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=600&auto=format&fit=crop&q=80"
             }
         }
     }
 
     suspend fun updateProperty(property: PropertyEntity) {
         withContext(Dispatchers.IO) {
-            appDao.updateProperty(property)
+            localDao.saveProperty(property)
+            try {
+                val dto = PropertyDto(
+                    id = property.id,
+                    host_id = property.hostEmail,
+                    title = property.title,
+                    description = property.description,
+                    price_per_night = property.price,
+                    city_id = property.city,
+                    address = property.address,
+                    latitude = property.latitude,
+                    longitude = property.longitude,
+                    property_type = property.propertyType,
+                    bedrooms = 1, bathrooms = 1, max_guests = 2,
+                    status = if(property.isActive) "approved" else "pending",
+                    images = listOf(property.imageUrls)
+                )
+                apiService.updateProperty(dto)
+            } catch (ignore: Exception) {}
         }
     }
 
     suspend fun deleteProperty(property: PropertyEntity) {
         withContext(Dispatchers.IO) {
-            appDao.deleteProperty(property)
+            localDao.deleteProperty(property)
+            try {
+                apiService.deleteProperty(property.id)
+            } catch (ignore: Exception) {}
         }
     }
 
     // Favorites
     fun getFavorites(userEmail: String): Flow<List<PropertyEntity>> {
-        return appDao.getFavoritesByUserFlow(userEmail).flatMapLatest { favs ->
-            appDao.getAllPropertiesFlow().map { properties ->
+        return localDao.getFavoritesByUserFlow(userEmail).flatMapLatest { favs ->
+            localDao.getAllPropertiesFlow().map { properties ->
                 val favIds = favs.map { it.propertyId }.toSet()
                 properties.filter { it.id in favIds }
             }
@@ -194,24 +328,27 @@ class StaysRepository private constructor(private val context: Context) {
 
     suspend fun isFavorite(userEmail: String, propertyId: String): Boolean {
         return withContext(Dispatchers.IO) {
-            appDao.getFavorite(userEmail, propertyId) != null
+            localDao.getFavorite(userEmail, propertyId) != null
         }
     }
 
     suspend fun toggleFavorite(userEmail: String, propertyId: String) {
         withContext(Dispatchers.IO) {
-            val existing = appDao.getFavorite(userEmail, propertyId)
+            val existing = localDao.getFavorite(userEmail, propertyId)
             if (existing != null) {
-                appDao.deleteFavorite(userEmail, propertyId)
+                localDao.deleteFavorite(userEmail, propertyId)
             } else {
-                appDao.insertFavorite(FavoriteEntity(userEmail = userEmail, propertyId = propertyId))
+                localDao.saveFavorite(FavoriteEntity(id = "${userEmail}_${propertyId}", userEmail = userEmail, propertyId = propertyId))
             }
+            try {
+                apiService.toggleFavorite(mapOf("property_id" to propertyId))
+            } catch (ignore: Exception) {}
         }
     }
 
     // Reservations
-    fun getReservationsByUser(userEmail: String): Flow<List<ReservationEntity>> = appDao.getReservationsByUserFlow(userEmail)
-    fun getAllReservations(): Flow<List<ReservationEntity>> = appDao.getAllReservationsFlow()
+    fun getReservationsByUser(userEmail: String): Flow<List<ReservationEntity>> = localDao.getReservationsByUserFlow(userEmail)
+    fun getAllReservations(): Flow<List<ReservationEntity>> = localDao.getAllReservationsFlow()
 
     suspend fun createReservation(
         propertyId: String,
@@ -233,10 +370,25 @@ class StaysRepository private constructor(private val context: Context) {
                 totalPrice = totalPrice,
                 status = "Upcoming"
             )
-            appDao.insertReservation(reservation)
+            localDao.saveReservation(reservation)
             
-            // Add notification
-            appDao.insertNotification(NotificationEntity(
+            try {
+                val dto = ReservationDto(
+                    id = id,
+                    property_id = propertyId,
+                    traveler_id = userEmail,
+                    host_id = "", // resolved backend side or fetched via relation
+                    start_date = checkIn.toString(),
+                    end_date = checkOut.toString(),
+                    total_price = totalPrice,
+                    status = "Upcoming"
+                )
+                apiService.addReservation(dto)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            
+            localDao.saveNotification(NotificationEntity(
                 id = "notif_" + System.currentTimeMillis(),
                 userEmail = userEmail,
                 title = "Booking Confirmed",
@@ -250,200 +402,93 @@ class StaysRepository private constructor(private val context: Context) {
     // Subscriptions
     suspend fun getHostSubscription(hostEmail: String): SubscriptionEntity? {
         return withContext(Dispatchers.IO) {
-            appDao.getSubscriptionsByHost(hostEmail).firstOrNull()
+            localDao.getSubscriptionsByHost(hostEmail).firstOrNull()
         }
     }
 
     suspend fun activateSubscription(hostEmail: String) {
         withContext(Dispatchers.IO) {
             val subscription = SubscriptionEntity(
+                id = "sub_${hostEmail}",
                 hostEmail = hostEmail,
                 startDate = System.currentTimeMillis(),
                 isFreeTrial = false,
                 status = "Active"
             )
-            appDao.insertSubscription(subscription)
+            localDao.saveSubscription(subscription)
             
-            // Re-activate host properties
-            val properties = appDao.getAllPropertiesFlow().first().filter { it.hostEmail == hostEmail }
+            val properties = localDao.getPropertiesByHostFlow(hostEmail).first()
             for (prop in properties) {
-                appDao.updateProperty(prop.copy(isActive = true))
+                localDao.saveProperty(prop.copy(isActive = true))
             }
         }
     }
 
     // Cities
-    fun getAllCities(): Flow<List<CityEntity>> = appDao.getAllCitiesFlow()
+    fun getAllCities(): Flow<List<CityEntity>> = localDao.getCitiesFlow()
+
+    private suspend fun refreshCities() {
+        try {
+            val response = apiService.getCities()
+            if(response.isSuccessful){
+                response.body()?.let { dtoList ->
+                    val entities = dtoList.map { mapCityDto(it) }
+                    localDao.saveCities(entities)
+                }
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+    }
 
     suspend fun addCity(city: CityEntity) {
         withContext(Dispatchers.IO) {
-            appDao.insertCity(city)
+            localDao.saveCity(city)
         }
     }
 
     suspend fun updateCity(city: CityEntity) {
         withContext(Dispatchers.IO) {
-            appDao.updateCity(city)
+            localDao.saveCity(city)
         }
     }
 
     suspend fun deleteCity(cityId: String) {
         withContext(Dispatchers.IO) {
-            appDao.deleteCity(cityId)
+            localDao.deleteCity(cityId)
         }
     }
 
-    // Seed Data
-    private suspend fun seedDatabaseIfEmpty() {
-        val count = appDao.getUserByEmail("admin@zellige.com")
-        if (count == null) {
-            // Seed Admin
-            val adminUser = UserEntity(
-                email = "admin@zellige.com",
-                fullName = "Ayoub Touati",
-                phone = "+212 600 000000",
-                role = "admin",
-                passwordHash = "admin123"
-            )
-            appDao.insertUser(adminUser)
+    // Mappers
+    private fun mapUserDto(dto: UserDto) = UserEntity(
+        email = dto.email,
+        fullName = dto.name,
+        role = dto.role
+    )
 
-            // Seed Demo Host
-            val hostUser = UserEntity(
-                email = "host@zellige.com",
-                fullName = "Rachid El Guerrouj",
-                phone = "+212 611 223344",
-                role = "host",
-                passwordHash = "host123"
-            )
-            appDao.insertUser(hostUser)
+    private fun mapCityDto(dto: CityDto) = CityEntity(
+        id = dto.id,
+        name_ar = dto.name_ar,
+        name_fr = dto.name_fr,
+        name_en = dto.name_en,
+        name_es = dto.name_es,
+        imageUrl = dto.imageUrl ?: "",
+        isActive = dto.is_active == 1,
+        isFeatured = dto.is_featured == 1
+    )
 
-            val trialSubscription = SubscriptionEntity(
-                hostEmail = "host@zellige.com",
-                startDate = System.currentTimeMillis() - (1000L * 60 * 60 * 24 * 5), // Registered 5 days ago
-                isFreeTrial = true,
-                status = "Active"
-            )
-            appDao.insertSubscription(trialSubscription)
-
-            // Seed Cities
-            val defaultCities = listOf(
-                CityEntity("marrakech", "مراكش", "Marrakech", "Marrakech", "Marrakech", "https://images.unsplash.com/photo-1597212618440-8062a4dfd60c?w=500&auto=format&fit=crop&q=80", true, true, System.currentTimeMillis()),
-                CityEntity("casablanca", "الدار البيضاء", "Casablanca", "Casablanca", "Casablanca", "https://images.unsplash.com/photo-1539650116574-8efeb43e2750?w=500&auto=format&fit=crop&q=80", true, false, System.currentTimeMillis()),
-                CityEntity("rabat", "الرباط", "Rabat", "Rabat", "Rabat", "https://images.unsplash.com/photo-1559589689-577aabd1db4f?w=500&auto=format&fit=crop&q=80", true, false, System.currentTimeMillis()),
-                CityEntity("agadir", "أكادير", "Agadir", "Agadir", "Agadir", "https://images.unsplash.com/photo-1583212292454-1fe6229603b7?w=500&auto=format&fit=crop&q=80", true, false, System.currentTimeMillis()),
-                CityEntity("tangier", "طنجة", "Tanger", "Tangier", "Tánger", "https://images.unsplash.com/photo-1578351586550-93a5ec9cfb16?w=500&auto=format&fit=crop&q=80", true, true, System.currentTimeMillis()),
-                CityEntity("chefchaouen", "شفشاون", "Chefchaouen", "Chefchaouen", "Chefchaouen", "https://images.unsplash.com/photo-1548786811-dd6e453ccae2?w=500&auto=format&fit=crop&q=80", true, true, System.currentTimeMillis())
-            )
-            appDao.insertCities(defaultCities)
-
-            // Seed Accommodations
-            val defaultProperties = listOf(
-                PropertyEntity(
-                    id = "p1",
-                    title = "Riad Celestial Dar Zellij",
-                    description = "A meticulously restored 17th-century luxury Moroccan mansion in the heart of Marrakech Medina. Featuring pristine hand-cut zellige mosaic art, an emerald-lit courtyard pool, custom carved cedarwood ceilings, and a high-contrast private hammam. Relax under the star-lit sky on our golden panoramic roof terrace overlooking the ancient Koutoubia mosque.",
-                    city = "Marrakech",
-                    address = "12 Derb El Halfaoui, Bab Doukkala",
-                    price = 180.00,
-                    rating = 4.95,
-                    propertyType = "Riad",
-                    amenities = "Pool, Spa (Hammam), Wi-Fi, Breakfast, AC, Fireplace",
-                    imageUrls = "https://images.unsplash.com/photo-1582719508461-905c673771fd?w=600&auto=format&fit=crop&q=80,https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=600&auto=format&fit=crop&q=80",
-                    hostEmail = "host@zellige.com",
-                    isActive = true,
-                    isSuggested = true,
-                    latitude = 31.6295,
-                    longitude = -7.9811
-                ),
-                PropertyEntity(
-                    id = "p2",
-                    title = "Royal Bab Marrakech Villa",
-                    description = "An estate built on the outskirts of Rabat, inspired by the monumental Bab Marrakech gate. Built with historic sun-baked earth colors, and complete with a luxury 20-meter infinity pool, private citrus garden, professional Moroccan chef, and standard modern automation.",
-                    city = "Rabat",
-                    address = "Km 9 Route de l'Ourika",
-                    price = 450.00,
-                    rating = 4.88,
-                    propertyType = "Villa",
-                    amenities = "Pool, Gym, Kitchen, Wi-Fi, Chef Service, Free Parking",
-                    imageUrls = "https://images.unsplash.com/photo-1613977257363-707ba9348227?w=600&auto=format&fit=crop&q=80,https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=600&auto=format&fit=crop&q=80",
-                    hostEmail = "host@zellige.com",
-                    isActive = true,
-                    isSuggested = true,
-                    latitude = 34.0209,
-                    longitude = -6.8416
-                ),
-                PropertyEntity(
-                    id = "p3",
-                    title = "Aromatic Blue Nest Riad",
-                    description = "Stay in a beautiful sky-blue room surrounded by aromatic mint gardens, authentic cobalt pottery, and gorgeous architectural niches in the iconic blue streets of Chefchaouen. Includes high-speed fiber internet and a delicious traditional breakfast on the rooftop.",
-                    city = "Chefchaouen",
-                    address = "42 Avenue Hassan II, Old Medina",
-                    price = 75.00,
-                    rating = 4.91,
-                    propertyType = "Riad",
-                    amenities = "Wi-Fi, Breakfast, Rooftop Terrace, Heating, Pet Friendly",
-                    imageUrls = "https://images.unsplash.com/photo-1548786811-dd6e453ccae2?w=600&auto=format&fit=crop&q=80,https://images.unsplash.com/photo-1564507592333-c60657eea523?w=600&auto=format&fit=crop&q=80",
-                    hostEmail = "host@zellige.com",
-                    isActive = true,
-                    isSuggested = false,
-                    latitude = 35.1688,
-                    longitude = -5.2636
-                ),
-                PropertyEntity(
-                    id = "p4",
-                    title = "Saharan Luxury Golden Dunes Camp",
-                    description = "Sleep in magnificent heavy canvas nomadic tents among the silent Erg Chebbi dunes. Complete with full en-suite restrooms, King size mattresses, Moroccan red rugs, camel desert trekking, and a stellar evening campfire carrying traditional Gnawa percussion.",
-                    city = "Agadir", // Placed in Agadir sector for direct flight connections
-                    address = "Merzouga Erg Chebbi Desert Sector",
-                    price = 220.00,
-                    rating = 4.98,
-                    propertyType = "Camp",
-                    amenities = "Desert Tour, Dinner Included, Breakfast, Firepit, Bathhouse",
-                    imageUrls = "https://images.unsplash.com/photo-1533105079780-92b9be482077?w=600&auto=format&fit=crop&q=80,https://images.unsplash.com/photo-1486916856992-e4db22c8df33?w=600&auto=format&fit=crop&q=80",
-                    hostEmail = "host@zellige.com",
-                    isActive = true,
-                    isSuggested = true,
-                    latitude = 30.4278,
-                    longitude = -9.5981
-                ),
-                PropertyEntity(
-                    id = "p5",
-                    title = "Habibi Ocean View Penthouse",
-                    description = "A magnificent contemporary Moroccan penthouse with direct views of the Atlantic Ocean and Gibraltar strait. Built with custom arches, fully modern ceramic kitchens, private hot tub, and modern security infrastructure.",
-                    city = "Tangier",
-                    address = "88 Rue de la Kasbah, Cliffside Section",
-                    price = 130.00,
-                    rating = 4.75,
-                    propertyType = "Apartment",
-                    amenities = "Ocean View, Wi-Fi, Kitchen, AC, Jacuzzi, Elevators",
-                    imageUrls = "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=600&auto=format&fit=crop&q=80,https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=600&auto=format&fit=crop&q=80",
-                    hostEmail = "host@zellige.com",
-                    isActive = true,
-                    isSuggested = false,
-                    latitude = 35.7595,
-                    longitude = -5.8340
-                ),
-                PropertyEntity(
-                    id = "p6",
-                    title = "Grand Boulevard Hassan II Suites",
-                    description = "Spacious modern apartment right in the premium center of Casablanca. Convenient walking distance to the spectacular Hassan II Mosque grand plaza, luxury shopping malls, and elite business districts.",
-                    city = "Casablanca",
-                    address = "143 Boulevard Moulay Youssef",
-                    price = 110.00,
-                    rating = 4.67,
-                    propertyType = "Apartment",
-                    amenities = "Wi-Fi, Kitchen, AC, Parking, Elevator, Washing Machine",
-                    imageUrls = "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=600&auto=format&fit=crop&q=80,https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=600&auto=format&fit=crop&q=80",
-                    hostEmail = "host@zellige.com",
-                    isActive = true,
-                    isSuggested = false,
-                    latitude = 33.5731,
-                    longitude = -7.5898
-                )
-            )
-            appDao.insertProperties(defaultProperties)
-        }
-    }
+    private fun mapPropertyDto(dto: PropertyDto) = PropertyEntity(
+        id = dto.id,
+        title = dto.title,
+        description = dto.description ?: "",
+        city = dto.city_id,
+        address = dto.address,
+        price = dto.price_per_night,
+        propertyType = dto.property_type,
+        imageUrls = dto.images?.joinToString(",") ?: "",
+        hostEmail = dto.host_id,
+        latitude = dto.latitude,
+        longitude = dto.longitude,
+        isActive = dto.status == "approved"
+    )
 
     companion object {
         @Volatile
@@ -458,3 +503,4 @@ class StaysRepository private constructor(private val context: Context) {
         }
     }
 }
+

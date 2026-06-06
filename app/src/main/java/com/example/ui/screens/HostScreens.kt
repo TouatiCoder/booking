@@ -469,7 +469,7 @@ fun AddPropertyScreen(
 
                 // Multiple Photo Picker and Upload section
                 Text(
-                    text = "Property Images & Media (Firebase Storage)",
+                    text = "Property Images & Media (PHP API)",
                     style = MaterialTheme.typography.titleMedium,
                     color = LuxuryDarkBlue,
                     fontWeight = FontWeight.Bold

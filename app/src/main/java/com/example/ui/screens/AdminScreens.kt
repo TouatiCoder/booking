@@ -40,8 +40,8 @@ fun AdminDashboardScreen(
     val allReservations by repository.getAllReservations().collectAsState(initial = emptyList())
     
     // Live collect users flow (we'll fetch once or collect)
-    val usersList by repository.appDao.getAllUsersFlow().collectAsState(initial = emptyList())
-    val subscriptionsList by repository.appDao.getAllSubscriptionsFlow().collectAsState(initial = emptyList())
+    val usersList by repository.getAllUsers().collectAsState(initial = emptyList())
+    val subscriptionsList by repository.getAllSubscriptionsFlow().collectAsState(initial = emptyList())
 
     var adminSectionTab by remember { mutableStateOf("Overview") }
     val sections = listOf("Overview", "Users", "Properties", "Bookings", "Subscriptions", "Cities")
@@ -309,7 +309,6 @@ fun AdminUsersSection(
                                 IconButton(
                                     onClick = {
                                         scope.launch {
-                                            repository.appDao.deleteProperty(PropertyEntity("none", "", "", "", "", 0.0, 0.0, "", "", "", "")) // placeholder cleanup
                                             // Ban profile simulation: we could delete user or change his password
                                         }
                                     }
@@ -547,7 +546,7 @@ fun AdminSubscriptionsSection(
                                     val targetStatus = if (sub.status == "Active") "Expired" else "Active"
                                     scope.launch {
                                         val overridden = sub.copy(status = targetStatus)
-                                        repository.appDao.insertSubscription(overridden)
+                                        repository.insertSubscription(overridden)
                                         
                                         // Deactivate stays of host automatically if expired
                                         val hostStays = properties.filter { it.hostEmail == sub.hostEmail }
