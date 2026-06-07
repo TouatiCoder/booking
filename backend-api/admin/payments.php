@@ -2,7 +2,7 @@
 require_once 'includes/session.php';
 
 $payments = $conn->query("
-    SELECT p.*, u.name as user_name 
+    SELECT p.*, u.full_name as user_name 
     FROM payments p 
     JOIN users u ON p.user_id = u.id 
     ORDER BY p.created_at DESC

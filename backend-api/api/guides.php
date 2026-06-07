@@ -9,7 +9,7 @@ $method = $_SERVER['REQUEST_METHOD'];
 if ($method === 'GET') {
     if (isset($_GET['action']) && $_GET['action'] == 'my_profile') {
         if (!isset($_GET['user_id'])) sendResponse(400, "Missing user_id");
-        $stmt = $conn->prepare("SELECT g.*, c.name as city_name, u.name, u.email FROM guides g LEFT JOIN cities c ON g.city_id = c.id JOIN users u ON g.user_id = u.id WHERE g.user_id = ?");
+        $stmt = $conn->prepare("SELECT g.*, c.name_en as city_name, u.full_name as name, u.email FROM guides g LEFT JOIN cities c ON g.city_id = c.id JOIN users u ON g.user_id = u.id WHERE g.user_id = ?");
         $stmt->execute([$_GET['user_id']]);
         $guide = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($guide) {
@@ -18,12 +18,12 @@ if ($method === 'GET') {
             echo json_encode(["success" => true, "data" => null]);
         }
     } else if (isset($_GET['id'])) {
-        $stmt = $conn->prepare("SELECT g.*, c.name as city_name, u.name, u.email FROM guides g LEFT JOIN cities c ON g.city_id = c.id JOIN users u ON g.user_id = u.id WHERE g.id = ?");
+        $stmt = $conn->prepare("SELECT g.*, c.name_en as city_name, u.full_name as name, u.email FROM guides g LEFT JOIN cities c ON g.city_id = c.id JOIN users u ON g.user_id = u.id WHERE g.id = ?");
         $stmt->execute([$_GET['id']]);
         $guide = $stmt->fetch(PDO::FETCH_ASSOC);
         echo json_encode(["success" => true, "data" => $guide]);
     } else {
-        $query = "SELECT g.*, c.name as city_name, u.name, u.email FROM guides g LEFT JOIN cities c ON g.city_id = c.id JOIN users u ON g.user_id = u.id WHERE g.status = 'approved'";
+        $query = "SELECT g.*, c.name_en as city_name, u.full_name as name, u.email FROM guides g LEFT JOIN cities c ON g.city_id = c.id JOIN users u ON g.user_id = u.id WHERE g.status = 'approved'";
         $params = [];
         
         if (isset($_GET['city_id']) && !empty($_GET['city_id'])) {

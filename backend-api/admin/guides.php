@@ -28,7 +28,7 @@ if (isset($_GET['action'])) {
     exit();
 }
 
-$guides = $conn->query("SELECT g.*, u.name, u.email, c.name as city_name FROM guides g JOIN users u ON g.user_id = u.id LEFT JOIN cities c ON g.city_id = c.id ORDER BY g.created_at DESC")->fetchAll();
+$guides = $conn->query("SELECT g.*, u.full_name as name, u.email, c.name_en as city_name FROM guides g JOIN users u ON g.user_id = u.id LEFT JOIN cities c ON g.city_id = c.id ORDER BY g.created_at DESC")->fetchAll();
 
 require_once 'includes/header.php';
 ?>

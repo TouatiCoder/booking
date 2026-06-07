@@ -22,20 +22,20 @@ $hashedPass = password_hash($data->password, PASSWORD_DEFAULT);
 
 $conn->beginTransaction();
 try {
-    $stmt = $conn->prepare("INSERT INTO users (id, name, email, password, role) VALUES (?, ?, ?, ?, ?)");
+    $stmt = $conn->prepare("INSERT INTO users (id, full_name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)");
     $stmt->execute([$id, $data->name, $data->email, $hashedPass, $data->role]);
     
     // If Host, give a free trial subscription based on Admin Settings
     if ($data->role === 'host') {
         // Fetch free trial duration
-        $setStmt = $conn->query("SELECT setting_value FROM settings WHERE setting_key = 'free_trial_duration_months'");
-        $months = $setStmt->fetchColumn();
-        if (!$months) $months = 2; // fallback
+        $setStmt = $conn->query("SELECT free_trial_duration_months, monthly_subscription_price FROM settings LIMIT 1");
+        $settings = $setStmt->fetch(PDO::FETCH_ASSOC);
+        $months = $settings ? $settings['free_trial_duration_months'] : 2;
 
         $sub_id = uniqid('sub_');
         $end_date = date('Y-m-d', strtotime("+$months months"));
-        $subStmt = $conn->prepare("INSERT INTO subscriptions (id, host_email, host_id, plan_name, start_date, end_date, amount, status) VALUES (?, ?, ?, 'Free Trial', CURDATE(), ?, 0, 'active')");
-        $subStmt->execute([$sub_id, $data->email, $id, $end_date]);
+        $subStmt = $conn->prepare("INSERT INTO subscriptions (id, host_id, start_date, end_date, amount, status) VALUES (?, ?, CURDATE(), ?, 0, 'active')");
+        $subStmt->execute([$sub_id, $id, $end_date]);
     }
 
     $conn->commit();
@@ -54,7 +54,9 @@ try {
         "token" => "mock_token_" . time()
     ]);
 } catch (Exception $e) {
-    $conn->rollBack();
+    if ($conn->inTransaction()) {
+        $conn->rollBack();
+    }
     sendResponse(500, "Failed to register user: " . $e->getMessage());
 }
 ?>

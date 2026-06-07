@@ -8,7 +8,7 @@ if (isset($_GET['delete'])) {
     exit();
 }
 
-$users = $conn->query("SELECT * FROM users WHERE role = 'traveler' AND deleted_at IS NULL ORDER BY createdAt DESC")->fetchAll();
+$users = $conn->query("SELECT * FROM users WHERE role = 'client' AND deleted_at IS NULL ORDER BY created_at DESC")->fetchAll();
 
 require_once 'includes/header.php';
 ?>
@@ -32,9 +32,9 @@ require_once 'includes/header.php';
                     <?php foreach($users as $user): ?>
                     <tr>
                         <td class="ps-4 text-muted small"><?= htmlspecialchars($user['id']) ?></td>
-                        <td class="fw-bold"><?= htmlspecialchars($user['name']) ?></td>
+                        <td class="fw-bold"><?= htmlspecialchars($user['full_name']) ?></td>
                         <td><?= htmlspecialchars($user['email']) ?></td>
-                        <td><?= date('Y-m-d H:i', strtotime($user['createdAt'])) ?></td>
+                        <td><?= date('Y-m-d H:i', strtotime($user['created_at'])) ?></td>
                         <td class="pe-4 text-end">
                             <a href="?delete=<?= $user['id'] ?>" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete traveler account?')"><i class="fas fa-trash"></i> Delete</a>
                         </td>

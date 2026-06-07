@@ -2,17 +2,14 @@
 require_once 'includes/session.php';
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['action'] == 'update_settings') {
-    $stmt = $conn->prepare("UPDATE settings SET setting_value = ? WHERE setting_key = 'monthly_subscription_price'");
-    $stmt->execute([$_POST['monthly_subscription_price']]);
-    
-    $stmt = $conn->prepare("UPDATE settings SET setting_value = ? WHERE setting_key = 'free_trial_duration_months'");
-    $stmt->execute([$_POST['free_trial_duration_months']]);
+    $stmt = $conn->prepare("UPDATE settings SET monthly_subscription_price = ?, free_trial_duration_months = ?");
+    $stmt->execute([$_POST['monthly_subscription_price'], $_POST['free_trial_duration_months']]);
     
     header("Location: settings.php?success=1");
     exit();
 }
 
-$settingsQuery = $conn->query("SELECT * FROM settings")->fetchAll(PDO::FETCH_KEY_PAIR);
+$settingsQuery = $conn->query("SELECT * FROM settings LIMIT 1")->fetch(PDO::FETCH_ASSOC);
 
 require_once 'includes/header.php';
 ?>

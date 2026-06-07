@@ -10,7 +10,7 @@ $conv_id = $_GET['id'];
 
 // Get Conversation Info
 $convStmt = $conn->prepare("
-    SELECT c.*, p.title as property_title, u1.name as client_name, u2.name as host_name 
+    SELECT c.*, p.title as property_title, u1.full_name as client_name, u2.full_name as host_name 
     FROM conversations c
     JOIN properties p ON c.property_id = p.id
     JOIN users u1 ON c.client_id = u1.id
@@ -27,7 +27,7 @@ if (!$conversation) {
 
 // Get Messages
 $msgStmt = $conn->prepare("
-    SELECT m.*, u.name as sender_name 
+    SELECT m.*, u.full_name as sender_name 
     FROM messages m
     JOIN users u ON m.sender_id = u.id
     WHERE m.conversation_id = ?
