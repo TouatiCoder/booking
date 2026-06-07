@@ -100,18 +100,14 @@ class StaysRepository private constructor(private val context: Context) {
                     "phone" to phone
                 )
                 val response = apiService.register(req)
-                if (response.isSuccessful && response.body()?.success == true) {
+                if (response.isSuccessful && response.body() != null) {
                     val authDto = response.body()!!
                     tokenManager.saveToken(authDto.token)
-                    authDto.user?.let { userDto ->
-                        val userEntity = mapUserDto(userDto).copy(phone = phone)
-                        localDao.saveUser(userEntity)
-                        _currentUserState.value = userEntity
-                    }
+                    val userEntity = mapUserDto(authDto.user).copy(phone = phone)
+                    localDao.saveUser(userEntity)
+                    _currentUserState.value = userEntity
                     true
                 } else {
-                    val errorMsg = response.body()?.message ?: "Unknown error"
-                    android.util.Log.e("StaysRepository", "Registration failed: $errorMsg")
                     false
                 }
             } catch (e: Exception) {
@@ -126,14 +122,12 @@ class StaysRepository private constructor(private val context: Context) {
             try {
                 val req = mapOf("email" to email, "password" to passwordHash)
                 val response = apiService.login(req)
-                if (response.isSuccessful && response.body()?.success == true) {
+                if (response.isSuccessful && response.body() != null) {
                     val authDto = response.body()!!
                     tokenManager.saveToken(authDto.token)
-                    authDto.user?.let { userDto ->
-                        val userEntity = mapUserDto(userDto)
-                        localDao.saveUser(userEntity)
-                        _currentUserState.value = userEntity
-                    }
+                    val userEntity = mapUserDto(authDto.user)
+                    localDao.saveUser(userEntity)
+                    _currentUserState.value = userEntity
                     true
                 } else {
                     false
