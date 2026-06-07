@@ -179,8 +179,10 @@ data class NotificationDto(
 
 @JsonClass(generateAdapter = true)
 data class AuthResponseDto(
-    val token: String,
-    val user: UserDto
+    val success: Boolean = true,
+    val message: String? = null,
+    val token: String = "",
+    val user: UserDto? = null
 )
 
 @JsonClass(generateAdapter = true)

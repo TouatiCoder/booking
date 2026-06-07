@@ -11,19 +11,31 @@ if (!isset($data->name) || !isset($data->email) || !isset($data->password) || !i
     sendResponse(400, "Missing required fields");
 }
 
-$stmt = $conn->prepare("SELECT id FROM users WHERE email = ?");
-$stmt->execute([$data->email]);
-if ($stmt->fetch()) {
-    sendResponse(400, "Email already exists");
-}
-
-$id = uniqid('usr_');
-$hashedPass = password_hash($data->password, PASSWORD_DEFAULT);
-
-$conn->beginTransaction();
 try {
+    // Audit step 9: Email existence validation
+    $stmt = $conn->prepare("SELECT id FROM users WHERE email = ?");
+    $stmt->execute([$data->email]);
+    if ($stmt->fetch()) {
+        // Audit step 13: Detailed debugging
+        echo json_encode([
+            "success" => false,
+            "message" => "Email already exists",
+            "email_exists" => true,
+            "insert_success" => false,
+            "database" => "mysql",
+            "debug_email" => $data->email
+        ]);
+        exit();
+    }
+
+    $id = uniqid('usr_');
+    $hashedPass = password_hash($data->password, PASSWORD_DEFAULT);
+
+    $conn->beginTransaction();
+
+    // Audit step 8: Database insertion logic
     $stmt = $conn->prepare("INSERT INTO users (id, name, email, password, role) VALUES (?, ?, ?, ?, ?)");
-    $stmt->execute([$id, $data->name, $data->email, $hashedPass, $data->role]);
+    $insertResult = $stmt->execute([$id, $data->name, $data->email, $hashedPass, $data->role]);
     
     // If Host, give a free trial subscription based on Admin Settings
     if ($data->role === 'host') {
@@ -39,12 +51,22 @@ try {
     }
 
     $conn->commit();
-    sendResendEmail($data->email, "Welcome to Zellige Stays", "Your account has been created successfully!");
-    
-    // Return standard response
+
+    try {
+        sendResendEmail($data->email, "Welcome to Zellige Stays", "Your account has been created successfully!");
+    } catch (Exception $e) {
+        // Don't fail registration if email fails
+        error_log("Email sending failed: " . $e->getMessage());
+    }
+
+    // Return detailed JSON for audit
     echo json_encode([
         "success" => true,
         "message" => "Registration successful",
+        "email_exists" => false,
+        "insert_success" => true,
+        "database" => "mysql",
+        "user_id" => $id,
         "user" => [
             "id" => $id,
             "name" => $data->name,
@@ -53,8 +75,18 @@ try {
         ],
         "token" => "mock_token_" . time()
     ]);
+
 } catch (Exception $e) {
-    $conn->rollBack();
-    sendResponse(500, "Failed to register user: " . $e->getMessage());
+    if ($conn->inTransaction()) {
+        $conn->rollBack();
+    }
+    // Return the exact SQL error if registration fails
+    http_response_code(500);
+    echo json_encode([
+        "success" => false,
+        "message" => "Failed to register user: " . $e->getMessage(),
+        "error_details" => $e->getTraceAsString(),
+        "database" => "mysql"
+    ]);
 }
 ?>

@@ -8,8 +8,8 @@ import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 
 object ApiClient {
-    // Uses 10.0.2.2 for emulator connecting to host machine localhost
-    private const val BASE_URL = "http://10.0.2.2/api/"
+    // Use the local IP address of the development server
+    private const val BASE_URL = "http://192.168.1.100/backend-api/"
 
     fun create(tokenManager: com.example.data.preferences.TokenManager): ApiService {
         val logging = HttpLoggingInterceptor().apply {
