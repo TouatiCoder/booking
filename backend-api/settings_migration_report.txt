@@ -1,0 +1,40 @@
+Settings SQL Schema Migration Report
+===================================================
+
+Task: Refactor deprecated SQL queries using setting_key / setting_value string maps to the unified Settings table columns schema.
+
+1. File: /backend-api/api/auth/register.php
+   Line: 31
+   Old Query: "SELECT setting_value FROM settings WHERE setting_key = 'free_trial_duration_months'"
+   New Query: "SELECT free_trial_duration_months, monthly_subscription_price FROM settings LIMIT 1"
+
+2. File: /backend-api/api/settings.php
+   Line: 6
+   Old Query: "SELECT setting_key, setting_value FROM settings"
+   New Query: "SELECT * FROM settings LIMIT 1"
+
+3. File: /backend-api/admin/branding.php
+   Line: 5
+   Old Query: "INSERT INTO settings (setting_key, setting_value, description) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE setting_value = ?"
+   New Query: "UPDATE settings SET app_name=?, app_logo=?, app_slogan=?, support_email=?, support_phone=?, primary_color=?, secondary_color=?"
+
+   Line: 25
+   Old Query: "SELECT * FROM settings" -> fetchAll(PDO::FETCH_KEY_PAIR)
+   New Query: "SELECT * FROM settings LIMIT 1" -> fetch(PDO::FETCH_ASSOC)
+
+4. File: /backend-api/admin/settings.php
+   Line: 5
+   Old Query: "UPDATE settings SET setting_value = ? WHERE setting_key = 'monthly_subscription_price'"
+   New Query: "UPDATE settings SET monthly_subscription_price = ?, free_trial_duration_months = ?"
+
+   Line: 13
+   Old Query: "SELECT * FROM settings" -> fetchAll(PDO::FETCH_KEY_PAIR)
+   New Query: "SELECT * FROM settings LIMIT 1" -> fetch(PDO::FETCH_ASSOC)
+
+5. File: /backend-api/config/database.php
+   Line: 7
+   Removed obsolete table provisioning injections:
+   "CREATE TABLE IF NOT EXISTS settings (setting_key VARCHAR(50) PRIMARY KEY, setting_value VARCHAR(255) NOT NULL, description TEXT)"
+   "INSERT IGNORE INTO settings (setting_key, setting_value, description) VALUES ('monthly_subscription_price', '99', ...)"
+
+All PHP files have been successfully verified to conform to the existing MySQL schema, preventing SQLSTATE[42S22] errors. Register API endpoint correctly leverages the refactored unified column-based schema without referencing missing properties or failing on transaction scope. Database schema itself was left intact.
