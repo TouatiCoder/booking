@@ -1,0 +1,34 @@
+# Prevent directory listing
+Options -Indexes
+
+# Protect sensitive files
+<FilesMatch "\.(env|ini|log|bak|sql|sh)$">
+    Require all denied
+</FilesMatch>
+
+# Protect config files
+<FilesMatch "^(config\.php|database\.php)$">
+    Require all denied
+</FilesMatch>
+
+# Protect directories
+RewriteRule ^config/ - [F,L]
+
+# Enable Rewrite Engine
+RewriteEngine On
+RewriteBase /backend-api/
+
+# Redirect index.php to root
+RewriteCond %{THE_REQUEST} ^[A-Z]{3,9}\ /([^/]+/)*/?index\.php\ HTTP/
+RewriteRule ^(.*)index\.php$ $1 [R=301,L]
+
+# Redirect .php to extensionless (GET requests only to preserve API POST behavior)
+RewriteCond %{REQUEST_METHOD} GET
+RewriteCond %{THE_REQUEST} ^[A-Z]{3,9}\ /([^/]+/)*/?([^.]+)\.php(\?[^\ ]*)?\ HTTP/
+RewriteRule ^(.+)\.php$ $1 [R=301,L,QSA]
+
+# Resolve extensionless URLs to .php files internally
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME}.php -f
+RewriteRule ^(.*)$ $1.php [L]
