@@ -1,29 +1,22 @@
 <?php
 require_once 'includes/session.php';
 
-$branding_keys = [
-    'app_display_name',
-    'app_logo',
-    'app_slogan',
-    'support_email',
-    'support_phone',
-    'primary_color',
-    'secondary_color',
-    'welcome_banner_image'
-];
-
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['action'] == 'update_branding') {
-    foreach ($branding_keys as $key) {
-        if (isset($_POST[$key])) {
-            $stmt = $conn->prepare("INSERT INTO settings (setting_key, setting_value, description) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE setting_value = ?");
-            $stmt->execute([$key, $_POST[$key], "Branding setting for $key", $_POST[$key]]);
-        }
-    }
+    $stmt = $conn->prepare("UPDATE settings SET app_name=?, app_logo=?, app_slogan=?, support_email=?, support_phone=?, primary_color=?, secondary_color=?");
+    $stmt->execute([
+        $_POST['app_display_name'], 
+        $_POST['app_logo'], 
+        $_POST['app_slogan'], 
+        $_POST['support_email'], 
+        $_POST['support_phone'], 
+        $_POST['primary_color'], 
+        $_POST['secondary_color']
+    ]);
     header("Location: branding.php?success=1");
     exit();
 }
 
-$settingsQuery = $conn->query("SELECT * FROM settings")->fetchAll(PDO::FETCH_KEY_PAIR);
+$settingsQuery = $conn->query("SELECT * FROM settings LIMIT 1")->fetch(PDO::FETCH_ASSOC);
 
 require_once 'includes/header.php';
 ?>
@@ -42,7 +35,7 @@ require_once 'includes/header.php';
             
             <div class="mb-4">
                 <label class="form-label fw-bold">Application Display Name</label>
-                <input type="text" name="app_display_name" class="form-control" value="<?= htmlspecialchars($settingsQuery['app_display_name'] ?? 'Zellige Stays') ?>" required>
+                <input type="text" name="app_display_name" class="form-control" value="<?= htmlspecialchars($settingsQuery['app_name'] ?? 'Zellige Stays') ?>" required>
             </div>
             
             <div class="mb-4">
@@ -52,7 +45,7 @@ require_once 'includes/header.php';
             
             <div class="mb-4">
                 <label class="form-label fw-bold">App Slogan</label>
-                <input type="text" name="app_slogan" class="form-control" value="<?= htmlspecialchars($settingsQuery['app_slogan'] ?? 'Marhaban • Welcome') ?>">
+                <input type="text" name="app_slogan" class="form-control" value="<?= htmlspecialchars($settingsQuery['app_slogan'] ?? 'Authentic Moroccan Experience') ?>">
             </div>
 
             <div class="mb-4">
@@ -67,17 +60,12 @@ require_once 'includes/header.php';
 
             <div class="mb-4">
                 <label class="form-label fw-bold">Primary Color (Hex)</label>
-                <input type="text" name="primary_color" class="form-control" value="<?= htmlspecialchars($settingsQuery['primary_color'] ?? '#AB8749') ?>">
+                <input type="text" name="primary_color" class="form-control" value="<?= htmlspecialchars($settingsQuery['primary_color'] ?? '#0A2540') ?>">
             </div>
             
             <div class="mb-4">
                 <label class="form-label fw-bold">Secondary Color (Hex)</label>
-                <input type="text" name="secondary_color" class="form-control" value="<?= htmlspecialchars($settingsQuery['secondary_color'] ?? '#0D2133') ?>">
-            </div>
-
-            <div class="mb-4">
-                <label class="form-label fw-bold">Welcome Banner Image URL</label>
-                <input type="text" name="welcome_banner_image" class="form-control" value="<?= htmlspecialchars($settingsQuery['welcome_banner_image'] ?? '') ?>">
+                <input type="text" name="secondary_color" class="form-control" value="<?= htmlspecialchars($settingsQuery['secondary_color'] ?? '#D4AF37') ?>">
             </div>
             
             <button type="submit" class="btn btn-primary px-4 fw-bold">Save Branding</button>

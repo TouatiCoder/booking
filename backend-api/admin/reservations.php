@@ -2,12 +2,12 @@
 require_once 'includes/session.php';
 
 $reservations = $conn->query("
-    SELECT r.*, p.title as property_title, u.name as traveler_name, h.name as host_name 
+    SELECT r.*, p.title as property_title, u.full_name as traveler_name, h.full_name as host_name 
     FROM reservations r 
     JOIN properties p ON r.property_id = p.id 
     JOIN users u ON r.traveler_id = u.id 
     JOIN users h ON r.host_id = h.id
-    ORDER BY r.createdAt DESC
+    ORDER BY r.created_at DESC
 ")->fetchAll();
 
 require_once 'includes/header.php';

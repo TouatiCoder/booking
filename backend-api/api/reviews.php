@@ -18,9 +18,9 @@ if ($method === 'GET') {
         $stmt = $conn->prepare("
             SELECT r.id FROM reservations r
             JOIN payments p ON r.id = p.reservation_id
-            WHERE r.user_email = ? AND r.property_id = ? 
-            AND r.status = 'completed' AND p.payment_status = 'paid'
-            AND r.id NOT IN (SELECT reservation_id FROM reviews WHERE user_id = ?)
+            WHERE r.client_id = ? AND r.property_id = ? 
+            AND r.reservation_status = 'completed' AND p.payment_status = 'paid'
+            AND r.id NOT IN (SELECT reservation_id FROM property_reviews WHERE user_id = ?)
             LIMIT 1
         ");
         $stmt->execute([$user_id, $property_id, $user_id]);
@@ -35,11 +35,11 @@ if ($method === 'GET') {
     } else if (isset($_GET['property_id'])) {
         $property_id = $_GET['property_id'];
         $stmt = $conn->prepare("
-            SELECT r.*, u.name as user_name 
-            FROM reviews r
-            JOIN users u ON r.user_id = u.id
-            WHERE r.property_id = ? AND r.is_hidden = 0
-            ORDER BY r.created_at DESC
+            SELECT rev.*, u.full_name as user_name 
+            FROM property_reviews rev
+            JOIN users u ON rev.user_id = u.id
+            WHERE rev.property_id = ?
+            ORDER BY rev.created_at DESC
         ");
         $stmt->execute([$property_id]);
         $reviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -58,8 +58,8 @@ if ($method === 'GET') {
     $stmt = $conn->prepare("
         SELECT r.id FROM reservations r
         JOIN payments p ON r.id = p.reservation_id
-        WHERE r.id = ? AND r.user_email = ? AND r.property_id = ?
-        AND r.status = 'completed' AND p.payment_status = 'paid'
+        WHERE r.id = ? AND r.client_id = ? AND r.property_id = ?
+        AND r.reservation_status = 'completed' AND p.payment_status = 'paid'
     ");
     $stmt->execute([$data->reservation_id, $data->user_id, $data->property_id]);
     if (!$stmt->fetch()) {
@@ -67,18 +67,18 @@ if ($method === 'GET') {
     }
 
     // Check if review already exists
-    $stmt = $conn->prepare("SELECT id FROM reviews WHERE reservation_id = ?");
+    $stmt = $conn->prepare("SELECT id FROM property_reviews WHERE reservation_id = ?");
     $stmt->execute([$data->reservation_id]);
     if ($stmt->fetch()) {
         sendResponse(400, "Review already submitted for this reservation");
     }
 
     $id = uniqid("rev_");
-    $stmt = $conn->prepare("INSERT INTO reviews (id, property_id, user_id, reservation_id, rating, comment) VALUES (?, ?, ?, ?, ?, ?)");
+    $stmt = $conn->prepare("INSERT INTO property_reviews (id, property_id, user_id, reservation_id, rating, comment) VALUES (?, ?, ?, ?, ?, ?)");
     $stmt->execute([$id, $data->property_id, $data->user_id, $data->reservation_id, $data->rating, $data->comment]);
 
     // Update property rating
-    $stmt = $conn->prepare("SELECT AVG(rating) as avg_rating, COUNT(id) as total FROM reviews WHERE property_id = ? AND is_hidden = 0");
+    $stmt = $conn->prepare("SELECT AVG(rating) as avg_rating, COUNT(id) as total FROM property_reviews WHERE property_id = ?");
     $stmt->execute([$data->property_id]);
     $stats = $stmt->fetch(PDO::FETCH_ASSOC);
 

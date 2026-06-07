@@ -2,10 +2,10 @@
 require_once 'includes/session.php';
 
 $notifs = $conn->query("
-    SELECT n.*, u.name as user_name 
+    SELECT n.*, u.full_name as user_name 
     FROM notifications n 
     JOIN users u ON n.user_id = u.id 
-    ORDER BY n.createdAt DESC LIMIT 150
+    ORDER BY n.created_at DESC LIMIT 150
 ")->fetchAll();
 
 require_once 'includes/header.php';
@@ -29,7 +29,7 @@ require_once 'includes/header.php';
                 <tbody>
                     <?php foreach($notifs as $n): ?>
                     <tr>
-                        <td class="ps-4 text-muted small"><?= date('Y-m-d H:i', strtotime($n['createdAt'])) ?></td>
+                        <td class="ps-4 text-muted small"><?= date('Y-m-d H:i', strtotime($n['created_at'])) ?></td>
                         <td class="fw-bold"><?= htmlspecialchars($n['user_name']) ?></td>
                         <td><?= htmlspecialchars($n['title']) ?></td>
                         <td><small class="text-muted"><?= htmlspecialchars($n['message']) ?></small></td>

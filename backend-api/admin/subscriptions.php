@@ -2,10 +2,10 @@
 require_once 'includes/session.php';
 
 $subs = $conn->query("
-    SELECT s.*, u.name as host_name 
+    SELECT s.*, u.full_name as host_name 
     FROM subscriptions s 
     JOIN users u ON s.host_id = u.id 
-    ORDER BY s.createdAt DESC
+    ORDER BY s.created_at DESC
 ")->fetchAll();
 
 require_once 'includes/header.php';

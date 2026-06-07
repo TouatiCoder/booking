@@ -8,7 +8,7 @@ if (isset($_GET['delete'])) {
     exit();
 }
 
-$hosts = $conn->query("SELECT * FROM users WHERE role = 'host' AND deleted_at IS NULL ORDER BY createdAt DESC")->fetchAll();
+$hosts = $conn->query("SELECT * FROM users WHERE role = 'host' AND deleted_at IS NULL ORDER BY created_at DESC")->fetchAll();
 
 require_once 'includes/header.php';
 ?>
@@ -32,9 +32,9 @@ require_once 'includes/header.php';
                     <?php foreach($hosts as $host): ?>
                     <tr>
                         <td class="ps-4 text-muted small"><?= htmlspecialchars($host['id']) ?></td>
-                        <td class="fw-bold text-primary"><i class="fas fa-house-user me-1"></i> <?= htmlspecialchars($host['name']) ?></td>
+                        <td class="fw-bold text-primary"><i class="fas fa-house-user me-1"></i> <?= htmlspecialchars($host['full_name']) ?></td>
                         <td><?= htmlspecialchars($host['email']) ?></td>
-                        <td><?= date('Y-m-d H:i', strtotime($host['createdAt'])) ?></td>
+                        <td><?= date('Y-m-d H:i', strtotime($host['created_at'])) ?></td>
                         <td class="pe-4 text-end">
                             <a href="?delete=<?= $host['id'] ?>" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete host account and all their properties?')"><i class="fas fa-trash"></i> Ban</a>
                         </td>

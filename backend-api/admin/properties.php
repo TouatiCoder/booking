@@ -6,20 +6,17 @@ if (isset($_GET['action']) && isset($_GET['id'])) {
     if ($status) {
         $stmt = $conn->prepare("UPDATE properties SET status = ? WHERE id = ?");
         $stmt->execute([$status, $_GET['id']]);
-        
-        $logStmt = $conn->prepare("INSERT INTO property_reviews_admin (property_id, admin_id, action) VALUES (?, ?, ?)");
-        $logStmt->execute([$_GET['id'], $_SESSION['admin_id'], $status]);
     }
     header("Location: properties.php");
     exit();
 }
 
 $properties = $conn->query("
-    SELECT p.*, u.name as host_name, c.name_en as city_name 
+    SELECT p.*, u.full_name as host_name, c.name_en as city_name 
     FROM properties p 
     JOIN users u ON p.host_id = u.id 
     JOIN cities c ON p.city_id = c.id
-    ORDER BY p.createdAt DESC
+    ORDER BY p.created_at DESC
 ")->fetchAll();
 
 require_once 'includes/header.php';

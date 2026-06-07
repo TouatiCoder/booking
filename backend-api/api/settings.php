@@ -3,12 +3,12 @@ header("Access-Control-Allow-Origin: *");
 header("Content-Type: application/json; charset=UTF-8");
 require_once '../config/database.php';
 
-$stmt = $conn->prepare("SELECT setting_key, setting_value FROM settings");
+$stmt = $conn->prepare("SELECT * FROM settings LIMIT 1");
 $stmt->execute();
-$settings = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+$settings = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$settings) {
-    echo json_encode(["monthly_subscription_price" => "99", "free_trial_duration_months" => "2"]);
+    echo json_encode(["app_name" => "Zellige Stays", "monthly_subscription_price" => 99, "free_trial_duration_months" => 2]);
     exit();
 }
 echo json_encode($settings);
