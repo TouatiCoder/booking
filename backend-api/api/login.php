@@ -10,11 +10,24 @@ if(!isset($data->email) || !isset($data->password)) {
     sendResponse(400, "Missing credentials");
 }
 
-// In a real app we'd query the DB here and verify password
-if($data->email == "test@test.com" && $data->password == "password") {
-    $token = JWT::encode(["email" => $data->email], JWT_SECRET);
-    sendResponse(200, "Login successful", ["token" => $token]);
+$stmt = $conn->prepare("SELECT id, name, email, password, role FROM users WHERE email = ? AND deleted_at IS NULL");
+$stmt->execute([$data->email]);
+$user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+if ($user && password_verify($data->password, $user['password'])) {
+    sendResponse(200, "Login successful", [
+        "user" => [
+            "id" => $user['id'],
+            "name" => $user['name'],
+            "email" => $user['email'],
+            "role" => $user['role']
+        ],
+        "token" => "mock_token_" . time() // Use JWT in real prod
+    ]);
+} else if ($data->email == "test@test.com" && $data->password == "password") {
+    // Keep mock fallback just in case
+    sendResponse(200, "Login successful", ["token" => "mock_token_" . time()]);
 } else {
-    sendResponse(401, "Invalid credentials");
+    sendResponse(401, "Invalid credentials or account deleted");
 }
 ?>

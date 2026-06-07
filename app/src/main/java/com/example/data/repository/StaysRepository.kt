@@ -40,6 +40,9 @@ class StaysRepository private constructor(private val context: Context) {
     private val _isFirstLaunchState = MutableStateFlow(sharedPrefs.getBoolean("is_first_launch", true))
     val isFirstLaunchState: StateFlow<Boolean> = _isFirstLaunchState.asStateFlow()
 
+    private val _brandingState = MutableStateFlow<Map<String, String>>(emptyMap())
+    val brandingState: StateFlow<Map<String, String>> = _brandingState.asStateFlow()
+
     init {
         // Load initial data and cached user on startup
         CoroutineScope(Dispatchers.IO).launch {
@@ -50,6 +53,20 @@ class StaysRepository private constructor(private val context: Context) {
             }
             refreshCities()
             refreshProperties()
+            refreshBranding()
+        }
+    }
+
+    suspend fun refreshBranding() {
+        withContext(Dispatchers.IO) {
+            try {
+                val response = apiService.getSettings()
+                if (response.isSuccessful && response.body() != null) {
+                    _brandingState.value = response.body()!!
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -132,6 +149,25 @@ class StaysRepository private constructor(private val context: Context) {
     fun logout() {
         tokenManager.clearToken()
         _currentUserState.value = null
+    }
+
+    suspend fun deleteAccount(): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val user = _currentUserState.value ?: return@withContext false
+                val req = mapOf("email" to user.email)
+                val response = apiService.deleteAccount(req)
+                if (response.isSuccessful) {
+                    logout()
+                    true
+                } else {
+                    false
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                false
+            }
+        }
     }
 
     suspend fun promoteToHost(email: String): Boolean {
@@ -346,6 +382,226 @@ class StaysRepository private constructor(private val context: Context) {
         }
     }
 
+    suspend fun getConversations(userId: String): List<ConversationDto> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val res = apiService.getConversations(userId)
+                if (res.isSuccessful) res.body()?.data ?: emptyList() else emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun getMessages(conversationId: String): List<MessageDto> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val res = apiService.getMessages(conversationId)
+                if (res.isSuccessful) res.body()?.data ?: emptyList() else emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun createConversation(propertyId: String, clientId: String, hostId: String): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val req = mapOf("property_id" to propertyId, "client_id" to clientId, "host_id" to hostId)
+                val res = apiService.createConversation(req)
+                if (res.isSuccessful) res.body()?.data?.get("conversation_id") else null
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    suspend fun sendMessage(conversationId: String, senderId: String, message: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val req = mapOf("conversation_id" to conversationId, "sender_id" to senderId, "message" to message)
+                val res = apiService.sendMessage(req)
+                res.isSuccessful
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+
+    suspend fun getReviews(propertyId: String): List<ReviewDto> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val res = apiService.getReviews(propertyId)
+                if (res.isSuccessful) res.body()?.data ?: emptyList() else emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun canReview(userId: String, propertyId: String): CanReviewResponseDto? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val res = apiService.canReview(userId, propertyId)
+                if (res.isSuccessful) res.body() else null
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    suspend fun submitReview(propertyId: String, userId: String, reservationId: String, rating: Int, comment: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val req = mapOf(
+                    "property_id" to propertyId,
+                    "user_id" to userId,
+                    "reservation_id" to reservationId,
+                    "rating" to rating.toString(),
+                    "comment" to comment
+                )
+                val res = apiService.submitReview(req)
+                res.isSuccessful && res.body()?.success == true
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+
+    // Guides API
+    suspend fun getGuides(cityId: String? = null): List<GuideDto> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val res = apiService.getGuides(cityId)
+                if (res.isSuccessful) res.body()?.data ?: emptyList() else emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun getGuideById(id: String): GuideDto? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val res = apiService.getGuideById(id)
+                if (res.isSuccessful) res.body()?.data else null
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    suspend fun getMyGuideProfile(userId: String): GuideDto? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val res = apiService.getMyGuideProfile(userId)
+                if (res.isSuccessful) res.body()?.data else null
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    suspend fun createGuideProfile(userId: String, pricePerDay: String, description: String, languages: String, cityId: String?, phone: String, specialties: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val req = mapOf(
+                    "action" to "create_profile",
+                    "user_id" to userId,
+                    "price_per_day" to pricePerDay,
+                    "description" to description,
+                    "languages" to languages,
+                    "city_id" to (cityId ?: ""),
+                    "phone" to phone,
+                    "specialties" to specialties
+                )
+                val res = apiService.createGuideProfile(req)
+                res.isSuccessful && res.body()?.success == true
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+
+    suspend fun bookGuide(travelerId: String, guideId: String, date: String, totalPrice: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val req = mapOf(
+                    "traveler_id" to travelerId,
+                    "guide_id" to guideId,
+                    "date" to date,
+                    "total_price" to totalPrice
+                )
+                val res = apiService.bookGuide(req)
+                res.isSuccessful && res.body()?.success == true
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+
+    suspend fun getTravelerGuideBookings(travelerId: String): List<GuideBookingDto> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val res = apiService.getTravelerGuideBookings(travelerId)
+                if (res.isSuccessful) res.body()?.data ?: emptyList() else emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun getGuideBookings(guideId: String): List<GuideBookingDto> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val res = apiService.getGuideBookings(guideId)
+                if (res.isSuccessful) res.body()?.data ?: emptyList() else emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun getGuideReviews(guideId: String): List<GuideReviewDto> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val res = apiService.getGuideReviews(guideId)
+                if (res.isSuccessful) res.body()?.data ?: emptyList() else emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun canReviewGuide(userId: String, guideId: String): CanReviewResponseDto? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val res = apiService.canReviewGuide(userId, guideId)
+                if (res.isSuccessful) res.body() else null
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    suspend fun submitGuideReview(guideId: String, userId: String, bookingId: String, rating: Int, comment: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val req = mapOf(
+                    "guide_id" to guideId,
+                    "user_id" to userId,
+                    "booking_id" to bookingId,
+                    "rating" to rating.toString(),
+                    "comment" to comment
+                )
+                val res = apiService.submitGuideReview(req)
+                res.isSuccessful && res.body()?.success == true
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+
     // Reservations
     fun getReservationsByUser(userEmail: String): Flow<List<ReservationEntity>> = localDao.getReservationsByUserFlow(userEmail)
     fun getAllReservations(): Flow<List<ReservationEntity>> = localDao.getAllReservationsFlow()
@@ -487,6 +743,8 @@ class StaysRepository private constructor(private val context: Context) {
         hostEmail = dto.host_id,
         latitude = dto.latitude,
         longitude = dto.longitude,
+        rating = dto.rating ?: 0.0,
+        totalReviews = dto.total_reviews ?: 0,
         isActive = dto.status == "approved"
     )
 

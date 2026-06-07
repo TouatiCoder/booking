@@ -38,6 +38,9 @@ import com.example.ui.screens.*
 import com.example.ui.theme.ZelligeStaysTheme
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import com.google.accompanist.permissions.rememberPermissionState
 import android.os.Build
 
@@ -74,31 +77,14 @@ class MainActivity : ComponentActivity() {
                     // Visitor login redirect cache
                     var pendingBookingPropertyId by remember { mutableStateOf<String?>(null) }
 
-                    // Determine first screen route dynamically
-                    val startDestination = when {
-                        currentLang.isEmpty() && isFirstLaunch -> "lang"
-                        isFirstLaunch -> "splash"
-                        else -> "splash" // Always show premium splash first
-                    }
+                    val startDestination = "splash" // Always show premium splash first
 
                     NavHost(
                         navController = navController,
                         startDestination = startDestination,
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        // 1. Language Selection
-                        composable("lang") {
-                            LanguageSelectionScreen(
-                                repository = repository,
-                                onLanguageSelected = {
-                                    navController.navigate("splash") {
-                                        popUpTo("lang") { inclusive = true }
-                                    }
-                                }
-                            )
-                        }
-
-                        // 2. Animated Splash
+                        // 1. Animated Splash
                         composable("splash") {
                             SplashScreen(
                                 repository = repository,
@@ -131,7 +117,16 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onNavigateToAdminDashboard = {
                                     navController.navigate("admin_dashboard")
-                                }
+                                },
+                                onNavigateToMessages = {
+                                    val user = repository.currentUserState.value
+                                    if (user == null) {
+                                        navController.navigate("login_register")
+                                    } else {
+                                        navController.navigate("messages_list")
+                                    }
+                                },
+                                onNavigateToGuides = { navController.navigate("guides") }
                             )
                         }
 
@@ -168,6 +163,19 @@ class MainActivity : ComponentActivity() {
                                     } else {
                                         // Grant authenticated check-out desk
                                         navController.navigate("booking/$targetPropId")
+                                    }
+                                },
+                                onContactHost = { targetPropId, hostId ->
+                                    val user = repository.currentUserState.value
+                                    if (user == null) {
+                                        navController.navigate("login_register")
+                                    } else {
+                                        CoroutineScope(Dispatchers.Main).launch {
+                                            val convId = repository.createConversation(targetPropId, user.email, hostId)
+                                            if (convId != null) {
+                                                navController.navigate("message_thread/$convId/Messages")
+                                            }
+                                        }
                                     }
                                 },
                                 onBack = { navController.popBackStack() }
@@ -230,6 +238,89 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
+                        // Messages Routing
+                        composable("messages_list") {
+                            com.example.ui.screens.ConversationsListScreen(
+                                repository = repository,
+                                onBack = { navController.popBackStack() },
+                                onConversationSelected = { convId, title ->
+                                    val safeTitle = android.net.Uri.encode(title)
+                                    navController.navigate("message_thread/$convId/$safeTitle")
+                                }
+                            )
+                        }
+
+                        // Guide Routing
+                        composable("guides") {
+                            com.example.ui.screens.TourGuidesScreen(
+                                repository = repository,
+                                onNavigateToDetails = { guideId ->
+                                    navController.navigate("guide_details/$guideId")
+                                }
+                            )
+                        }
+
+                        composable(
+                            route = "guide_details/{guideId}",
+                            arguments = listOf(navArgument("guideId") { type = NavType.StringType })
+                        ) { backStackEntry ->
+                            val guideId = backStackEntry.arguments?.getString("guideId") ?: ""
+                            com.example.ui.screens.GuideDetailsScreen(
+                                repository = repository,
+                                guideId = guideId,
+                                onContactGuide = { gId, guideUserId ->
+                                    val user = repository.currentUserState.value
+                                    if (user == null) {
+                                        navController.navigate("login_register")
+                                    } else {
+                                        // TODO: Message thread logic for guides if requested. Right now just open a dummy or use existing logic.
+                                    }
+                                },
+                                onBookGuide = { gId ->
+                                    val user = repository.currentUserState.value
+                                    if (user == null) {
+                                        navController.navigate("login_register")
+                                    } else {
+                                        navController.navigate("book_guide/$gId")
+                                    }
+                                },
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable(
+                            route = "book_guide/{guideId}",
+                            arguments = listOf(navArgument("guideId") { type = NavType.StringType })
+                        ) { backStackEntry ->
+                            val guideId = backStackEntry.arguments?.getString("guideId") ?: ""
+                            com.example.ui.screens.GuideBookingScreen(
+                                repository = repository,
+                                guideId = guideId,
+                                onSuccess = {
+                                    navController.popBackStack()
+                                    // nav to main or guides
+                                },
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable(
+                            "message_thread/{convId}/{title}",
+                            arguments = listOf(
+                                androidx.navigation.navArgument("convId") { type = androidx.navigation.NavType.StringType },
+                                androidx.navigation.navArgument("title") { type = androidx.navigation.NavType.StringType }
+                            )
+                        ) { backStackEntry ->
+                            val convId = backStackEntry.arguments?.getString("convId") ?: ""
+                            val title = android.net.Uri.decode(backStackEntry.arguments?.getString("title") ?: "")
+                            com.example.ui.screens.MessageThreadScreen(
+                                repository = repository,
+                                conversationId = convId,
+                                title = title,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+
                         // 8. Host Command Center
                         composable("host_dashboard") {
                             HostDashboardScreen(
@@ -286,7 +377,9 @@ fun MainTabContainer(
     onNavigateToLogin: () -> Unit,
     onNavigateToRegister: () -> Unit,
     onNavigateToHostDashboard: () -> Unit,
-    onNavigateToAdminDashboard: () -> Unit
+    onNavigateToAdminDashboard: () -> Unit,
+    onNavigateToMessages: () -> Unit = {},
+    onNavigateToGuides: () -> Unit = {}
 ) {
     val currentLang by repository.currentLanguageState.collectAsState()
     var currentSelectedTab by remember { mutableStateOf("home") }
@@ -343,7 +436,8 @@ fun MainTabContainer(
                     repository = repository,
                     onNavigateToDetails = onNavigateToDetails,
                     onNavigateToSearch = onNavigateToSearchByCity,
-                    onNavigateToSearchTab = { currentSelectedTab = "search" }
+                    onNavigateToSearchTab = { currentSelectedTab = "search" },
+                    onNavigateToGuides = onNavigateToGuides
                 )
                 "search" -> SearchScreen(
                     repository = repository,
@@ -377,12 +471,12 @@ fun MainTabContainer(
                     onNavigateToLogin = onNavigateToLogin,
                     onNavigateToRegister = onNavigateToRegister,
                     onNavigateToReservations = {
-                        // Trick tabs, render bookings directly by swapping home to bookings sequence
                         currentSelectedTab = "bookings_shortcut"
                     },
                     onNavigateToFavorites = { currentSelectedTab = "favorites" },
                     onNavigateToHostDashboard = onNavigateToHostDashboard,
-                    onNavigateToAdminDashboard = onNavigateToAdminDashboard
+                    onNavigateToAdminDashboard = onNavigateToAdminDashboard,
+                    onNavigateToMessages = onNavigateToMessages
                 )
                 
                 // Bookings view tab shortcut

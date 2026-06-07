@@ -21,19 +21,22 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.data.repository.StaysRepository
 import com.example.ui.localization.Localization
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LanguageSelectionScreen(
+fun LanguageSelectionDialog(
     repository: StaysRepository,
     onLanguageSelected: () -> Unit
 ) {
@@ -47,102 +50,56 @@ fun LanguageSelectionScreen(
         "es" to "Español"
     )
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(LuxuryDarkBlue, Color(0xFF0F2C46))
+    AlertDialog(
+        onDismissRequest = { /* Force selection */ },
+        modifier = Modifier.fillMaxWidth().testTag("language_selection_dialog"),
+        shape = RoundedCornerShape(24.dp),
+        containerColor = LuxuryDarkBlue,
+        title = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                MoroccanStarIcon(modifier = Modifier.size(48.dp).padding(bottom = 8.dp), color = LuxuryGold)
+                Text(
+                    text = "Pick Your Language\nاختر لغة الإقامة",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = LuxuryWhite,
+                    textAlign = TextAlign.Center
                 )
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        // Decorative geometric backdrop (Zellige geometric circles/stars)
-        ZelligeBackdropPattern()
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            // Elegant star motif
-            MoroccanStarIcon(
-                modifier = Modifier
-                    .size(80.dp)
-                    .padding(bottom = 16.dp),
-                color = LuxuryGold
-            )
-
-            Text(
-                text = "ZELLIGE STAYS",
-                style = MaterialTheme.typography.displayMedium,
-                color = LuxuryGold,
-                textAlign = TextAlign.Center,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.sp
-            )
-
-            Text(
-                text = "Marhaban • Welcome",
-                style = MaterialTheme.typography.titleMedium,
-                color = LuxuryWhite,
-                modifier = Modifier.padding(top = 8.dp, bottom = 24.dp),
-                textAlign = TextAlign.Center
-            )
-
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF13324E).copy(alpha = 0.85f)),
-                shape = RoundedCornerShape(16.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, LuxuryGold.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "Pick Your Language\nاختر لغة الإقامة الأدعم",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = LuxuryWhite,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(bottom = 20.dp)
-                    )
-
-                    languages.forEach { (code, name) ->
-                        Button(
-                            onClick = {
-                                selectedLang = code
-                                coroutineScope.launch {
-                                    repository.saveLanguage(code)
-                                    onLanguageSelected()
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (selectedLang == code) LuxuryGold else Color.Transparent
-                            ),
-                            border = BorderStroke(1.dp, if (selectedLang == code) LuxuryGold else LuxuryWhite.copy(alpha = 0.5f)),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp)
-                                .padding(vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = name,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = if (selectedLang == code) LuxuryDarkBlue else LuxuryWhite,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+            }
+        },
+        text = {
+            Column {
+                languages.forEach { (code, name) ->
+                    Button(
+                        onClick = {
+                            selectedLang = code
+                            coroutineScope.launch {
+                                repository.saveLanguage(code)
+                                repository.completeFirstLaunch()
+                                onLanguageSelected()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (selectedLang == code) LuxuryGold else Color.Transparent
+                        ),
+                        border = BorderStroke(1.dp, if (selectedLang == code) LuxuryGold else LuxuryWhite.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = name,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = if (selectedLang == code) LuxuryDarkBlue else LuxuryWhite,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
             }
-        }
-    }
+        },
+        confirmButton = {}
+    )
 }
 
 @Composable
@@ -151,7 +108,22 @@ fun SplashScreen(
     onSplashFinished: () -> Unit
 ) {
     val currentLang by repository.currentLanguageState.collectAsState()
+    val branding by repository.brandingState.collectAsState()
     
+    val appTitle = branding["app_display_name"]?.takeIf { it.isNotBlank() } ?: Localization.get("app_title", currentLang)
+    val appSlogan = branding["app_slogan"]?.takeIf { it.isNotBlank() } ?: Localization.get("splash_sub", currentLang)
+    val appLogoUrl = branding["app_logo"]?.takeIf { it.isNotBlank() }
+    
+    val primaryColorHex = branding["primary_color"]
+    val dynamicGold = if (!primaryColorHex.isNullOrBlank()) {
+        try { Color(android.graphics.Color.parseColor(primaryColorHex)) } catch (e: Exception) { LuxuryGold }
+    } else LuxuryGold
+
+    val secondaryColorHex = branding["secondary_color"]
+    val dynamicBg = if (!secondaryColorHex.isNullOrBlank()) {
+        try { Color(android.graphics.Color.parseColor(secondaryColorHex)) } catch (e: Exception) { LuxuryDarkBlue }
+    } else LuxuryDarkBlue
+
     // Smooth pulse/fade animations
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val scale by infiniteTransition.animateFloat(
@@ -170,17 +142,16 @@ fun SplashScreen(
         alphaAnim.animateTo(1f, animationSpec = tween(1500))
         // Show splash screen for 5 seconds as mandated
         delay(5000)
-        repository.completeFirstLaunch()
         onSplashFinished()
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(LuxuryDarkBlue),
+            .background(dynamicBg),
         contentAlignment = Alignment.Center
     ) {
-        ZelligeBackdropPattern()
+        ZelligeBackdropPattern(dynamicGold)
 
         Column(
             modifier = Modifier
@@ -197,25 +168,35 @@ fun SplashScreen(
                 // Outer ring
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     drawCircle(
-                        color = LuxuryGold,
+                        color = dynamicGold,
                         radius = size.minDimension / 2.3f,
                         style = Stroke(width = 2.dp.toPx())
                     )
                 }
                 
-                // Inside custom moroccan geometric pattern
-                MoroccanStarIcon(
-                    modifier = Modifier.size(100.dp),
-                    color = LuxuryGold
-                )
+                if (appLogoUrl != null) {
+                    AsyncImage(
+                        model = appLogoUrl,
+                        contentDescription = "Dynamic Logo",
+                        modifier = Modifier
+                            .size(100.dp)
+                            .clip(RoundedCornerShape(50.dp))
+                    )
+                } else {
+                    // Inside custom moroccan geometric pattern
+                    MoroccanStarIcon(
+                        modifier = Modifier.size(100.dp),
+                        color = dynamicGold
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(32.dp))
 
             Text(
-                text = Localization.get("app_title", currentLang),
+                text = appTitle,
                 style = MaterialTheme.typography.displayLarge,
-                color = LuxuryGold,
+                color = dynamicGold,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
                 fontSize = 36.sp,
@@ -225,9 +206,9 @@ fun SplashScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = Localization.get("splash_sub", currentLang),
+                text = appSlogan,
                 style = MaterialTheme.typography.titleMedium,
-                color = LuxuryLightGold,
+                color = dynamicGold.copy(alpha = 0.8f),
                 fontWeight = FontWeight.Light,
                 textAlign = TextAlign.Center,
                 letterSpacing = 2.sp
@@ -236,7 +217,7 @@ fun SplashScreen(
             Spacer(modifier = Modifier.height(48.dp))
 
             CircularProgressIndicator(
-                color = LuxuryGold,
+                color = dynamicGold,
                 strokeWidth = 2.dp,
                 modifier = Modifier.size(24.dp)
             )
@@ -279,7 +260,7 @@ fun MoroccanStarIcon(modifier: Modifier = Modifier, color: Color) {
 }
 
 @Composable
-fun ZelligeBackdropPattern() {
+fun ZelligeBackdropPattern(color: Color = LuxuryGold) {
     Canvas(modifier = Modifier.fillMaxSize().alpha(0.12f)) {
         val spacing = 20.dp.toPx()
         val columns = (size.width / spacing).toInt() + 2
@@ -288,7 +269,7 @@ fun ZelligeBackdropPattern() {
         for (col in 0 until columns) {
             for (row in 0 until rows) {
                 drawCircle(
-                    color = LuxuryGold,
+                    color = color,
                     radius = 1.2f.dp.toPx(),
                     center = androidx.compose.ui.geometry.Offset(col * spacing, row * spacing)
                 )

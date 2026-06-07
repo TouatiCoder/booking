@@ -29,6 +29,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import com.example.data.dto.ReviewDto
+
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,7 +52,8 @@ fun HomeScreen(
     repository: StaysRepository,
     onNavigateToDetails: (String) -> Unit,
     onNavigateToSearch: (String) -> Unit, // Direct search by city click
-    onNavigateToSearchTab: () -> Unit
+    onNavigateToSearchTab: () -> Unit,
+    onNavigateToGuides: () -> Unit = {}
 ) {
     val currentLang by repository.currentLanguageState.collectAsState()
     val properties by repository.getActiveProperties().collectAsState(initial = emptyList())
@@ -58,9 +61,29 @@ fun HomeScreen(
     val cities = allCities.filter { it.isActive && it.isFeatured }
 
     val user by repository.currentUserState.collectAsState()
+    val isFirstLaunch by repository.isFirstLaunchState.collectAsState()
+    val branding by repository.brandingState.collectAsState()
+
+    val appLogoUrl = branding["app_logo"]?.takeIf { it.isNotBlank() }
+    val primaryColorHex = branding["primary_color"]
+    val dynamicGold = if (!primaryColorHex.isNullOrBlank()) {
+        try { Color(android.graphics.Color.parseColor(primaryColorHex)) } catch (e: Exception) { LuxuryGold }
+    } else LuxuryGold
+
+    val secondaryColorHex = branding["secondary_color"]
+    val dynamicBg = if (!secondaryColorHex.isNullOrBlank()) {
+        try { Color(android.graphics.Color.parseColor(secondaryColorHex)) } catch (e: Exception) { LuxuryDarkBlue }
+    } else LuxuryDarkBlue
 
     var selectedCategory by remember { mutableStateOf("All") }
     val categories = listOf("All", "Riad", "Kasbah", "Villa", "Camp", "Apartment")
+    
+    if (isFirstLaunch) {
+        LanguageSelectionDialog(
+            repository = repository,
+            onLanguageSelected = {} // Internal logic already updates repo
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -73,10 +96,10 @@ fun HomeScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(bottomStart = 40.dp, bottomEnd = 40.dp))
-                .background(LuxuryDarkBlue)
+                .background(dynamicBg)
                 .padding(top = 24.dp, bottom = 40.dp)
         ) {
-            ZelligeBackdropPattern()
+            ZelligeBackdropPattern(dynamicGold)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -91,7 +114,7 @@ fun HomeScreen(
                         Text(
                             text = "Ahlal Wa Sahlan" + if (user != null) ", ${user?.fullName?.split(" ")?.firstOrNull()}" else "",
                             style = MaterialTheme.typography.titleMedium,
-                            color = LuxuryLightGold
+                            color = dynamicGold.copy(alpha = 0.8f) // replaced LuxuryLightGold
                         )
                         Text(
                             text = Localization.get("discover", currentLang),
@@ -102,10 +125,20 @@ fun HomeScreen(
                         )
                     }
 
-                    MoroccanStarIcon(
-                        modifier = Modifier.size(52.dp),
-                        color = LuxuryGold
-                    )
+                    if (appLogoUrl != null) {
+                        coil.compose.AsyncImage(
+                            model = appLogoUrl,
+                            contentDescription = "App Logo",
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(RoundedCornerShape(26.dp))
+                        )
+                    } else {
+                        MoroccanStarIcon(
+                            modifier = Modifier.size(52.dp),
+                            color = dynamicGold
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -240,6 +273,28 @@ fun HomeScreen(
                             )
                         }
                     }
+                }
+            }
+        }
+
+        // Tour Guides Banner
+        Card(
+            onClick = onNavigateToGuides,
+            colors = CardDefaults.cardColors(containerColor = LuxuryDarkBlue),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 8.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Person, contentDescription = null, tint = LuxuryGold, modifier = Modifier.size(40.dp))
+                Spacer(modifier = Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Find a Tour Guide", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text("Explore cities with local experts.", color = Color.LightGray, fontSize = 14.sp)
                 }
             }
         }
@@ -756,6 +811,7 @@ fun PropertyDetailsScreen(
     repository: StaysRepository,
     propertyId: String,
     onNavigateToBooking: (String) -> Unit,
+    onContactHost: (String, String) -> Unit = { _, _ -> },
     onBack: () -> Unit
 ) {
     val currentLang by repository.currentLanguageState.collectAsState()
@@ -916,7 +972,7 @@ fun PropertyDetailsScreen(
                     ) {
                         Icon(Icons.Default.Star, contentDescription = null, tint = LuxuryGold, modifier = Modifier.size(18.dp))
                         Text(
-                            text = String.format("%.2f", stay.rating),
+                            text = String.format("%.1f", stay.rating) + " (${stay.totalReviews} reviews)",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = TextDark
@@ -1044,12 +1100,25 @@ fun PropertyDetailsScreen(
                             )
                         }
                         Spacer(modifier = Modifier.width(16.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(text = "Hosted by: ${stay.hostEmail}", style = MaterialTheme.typography.titleMedium, color = TextDark, fontWeight = FontWeight.Bold)
                             Text(text = "Zellige Premium Elite Partner", style = MaterialTheme.typography.bodySmall, color = LuxuryZelligeGreen)
                         }
+                        IconButton(
+                            onClick = { onContactHost(stay.id, stay.hostEmail) },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(LuxuryDarkBlue.copy(alpha = 0.1f), CircleShape)
+                        ) {
+                            Icon(Icons.Default.MailOutline, contentDescription = "Contact Host", tint = LuxuryDarkBlue)
+                        }
                     }
                 }
+
+                Divider(color = BorderLight, modifier = Modifier.padding(vertical = 16.dp))
+
+                // Reviews Section
+                PropertyReviewsSection(repository, propertyId)
 
                 Spacer(modifier = Modifier.height(100.dp)) // Padding for floating footer
             }
@@ -1537,6 +1606,149 @@ fun FavoritesScreen(
                         repository = repository,
                         onClick = { onNavigateToDetails(prop.id) }
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PropertyReviewsSection(repository: StaysRepository, propertyId: String) {
+    val currentUser by repository.currentUserState.collectAsState()
+    var reviews by remember { mutableStateOf<List<ReviewDto>>(emptyList()) }
+    var averageRating by remember { mutableFloatStateOf(0f) }
+    
+    var canReview by remember { mutableStateOf(false) }
+    var reservationId by remember { mutableStateOf<String?>(null) }
+    
+    var showReviewDialog by remember { mutableStateOf(false) }
+
+    fun refreshData() {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+            reviews = repository.getReviews(propertyId)
+            averageRating = if (reviews.isNotEmpty()) reviews.map { it.rating.toFloat() }.average().toFloat() else 0f
+            if (currentUser != null) {
+                val cr = repository.canReview(currentUser!!.email, propertyId)
+                canReview = cr?.can_review ?: false
+                reservationId = cr?.reservation_id
+            }
+        }
+    }
+
+    LaunchedEffect(propertyId, currentUser) {
+        refreshData()
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+            Text("Verified Reviews", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TextDark)
+            if (reviews.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Star, contentDescription = null, tint = LuxuryGold, modifier = Modifier.size(20.dp))
+                    Text(text = String.format("%.1f", averageRating), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextDark)
+                    Text(text = " (${reviews.size})", style = MaterialTheme.typography.bodyMedium, color = TextLight)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (canReview && reservationId != null) {
+            Button(
+                onClick = { showReviewDialog = true },
+                colors = ButtonDefaults.buttonColors(containerColor = LuxuryGold),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+            ) {
+                Text("Leave a Review", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        } else if (reviews.isEmpty()) {
+            Text("No reviews yet for this property.", color = TextLight, modifier = Modifier.padding(16.dp).align(Alignment.CenterHorizontally))
+        }
+
+        reviews.forEach { r ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = CardBackground),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, BorderLight),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                        Text(r.user_name ?: "Traveler", fontWeight = FontWeight.Bold, color = TextDark)
+                        val date = r.created_at?.take(10) ?: ""
+                        Text(date, fontSize = 12.sp, color = TextLight)
+                    }
+                    Row(modifier = Modifier.padding(vertical = 4.dp)) {
+                        for (i in 1..5) {
+                            Icon(Icons.Default.Star, contentDescription = null, tint = if (i <= r.rating) LuxuryGold else BorderLight, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                    Text(r.comment, color = TextDark, fontSize = 14.sp)
+                }
+            }
+        }
+    }
+
+    if (showReviewDialog && reservationId != null && currentUser != null) {
+        var rating by remember { mutableIntStateOf(5) }
+        var comment by remember { mutableStateOf("") }
+        var isSubmitting by remember { mutableStateOf(false) }
+
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showReviewDialog = false }) {
+            Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    Text("Write a Review", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TextDark)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                        for (i in 1..5) {
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = null,
+                                tint = if (i <= rating) LuxuryGold else BorderLight,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clickable { rating = i }
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = comment,
+                        onValueChange = { comment = it },
+                        label = { Text("Your comment") },
+                        modifier = Modifier.fillMaxWidth().height(100.dp),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = LuxuryGold, unfocusedBorderColor = BorderLight)
+                    )
+                    
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = { showReviewDialog = false }) {
+                            Text("Cancel", color = TextLight)
+                        }
+                        Button(
+                            onClick = {
+                                if (comment.isNotBlank()) {
+                                    isSubmitting = true
+                                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                        val success = repository.submitReview(propertyId, currentUser!!.email, reservationId!!, rating, comment)
+                                        isSubmitting = false
+                                        if (success) {
+                                            showReviewDialog = false
+                                            refreshData()
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = !isSubmitting,
+                            colors = ButtonDefaults.buttonColors(containerColor = LuxuryGold)
+                        ) {
+                            if (isSubmitting) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
+                            else Text("Submit", color = Color.White)
+                        }
+                    }
                 }
             }
         }

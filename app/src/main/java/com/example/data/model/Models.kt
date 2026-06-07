@@ -21,6 +21,7 @@ data class PropertyEntity(
     val address: String = "",
     val price: Double = 0.0,
     val rating: Double = 0.0,
+    val totalReviews: Int = 0,
     val propertyType: String = "", // "Riad", "Kasbah", "Villa", "Apartment", "Camp"
     val amenities: String = "", // Comma separated list, e.g. "Pool, Wi-Fi, Spa, Tour, Breakfast"
     val imageUrls: String = "", // Comma separated list of URLs

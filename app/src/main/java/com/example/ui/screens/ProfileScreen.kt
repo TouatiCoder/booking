@@ -37,7 +37,8 @@ fun ProfileScreen(
     onNavigateToReservations: () -> Unit,
     onNavigateToFavorites: () -> Unit,
     onNavigateToHostDashboard: () -> Unit,
-    onNavigateToAdminDashboard: () -> Unit
+    onNavigateToAdminDashboard: () -> Unit,
+    onNavigateToMessages: () -> Unit = {}
 ) {
     val currentLang by repository.currentLanguageState.collectAsState()
     val scope = rememberCoroutineScope()
@@ -237,6 +238,13 @@ fun ProfileScreen(
                     tag = "favorites_portal_row"
                 )
 
+                ProfileMenuRow(
+                    icon = Icons.Default.Email, // Ensure this exists or use Mail
+                    title = "Messages", // Could be mapped in Localization
+                    onClick = onNavigateToMessages,
+                    tag = "messages_portal_row"
+                )
+
                 // BECOME HOST CTA (Prompted only for normal Client accounts)
                 if (currentUser.role == "client" || currentUser.role == "guest") {
                     Card(
@@ -280,7 +288,37 @@ fun ProfileScreen(
             }
         }
 
+        val branding by repository.brandingState.collectAsState()
+        val supportEmail = branding["support_email"]?.takeIf { it.isNotBlank() } ?: "support@zelligestays.com"
+        val supportPhone = branding["support_phone"]?.takeIf { it.isNotBlank() } ?: "+212 500 000 000"
+
         Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = "Settings & Support",
+            style = MaterialTheme.typography.titleLarge,
+            color = LuxuryDarkBlue,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+        
+        Card(
+            colors = CardDefaults.cardColors(containerColor = CardBackground),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "Contact Support",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextDark,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                Text(text = "Email: $supportEmail", style = MaterialTheme.typography.bodyMedium, color = TextLight)
+                Text(text = "Phone: $supportPhone", style = MaterialTheme.typography.bodyMedium, color = TextLight)
+            }
+        }
 
         // Dynamic On-The-Fly Language Selector Widget (accessible to visitors as well)
         Card(
@@ -328,7 +366,7 @@ fun ProfileScreen(
             }
         }
 
-        // Logout
+        // Logout & Delete Account
         if (user != null) {
             Spacer(modifier = Modifier.height(24.dp))
             Button(
@@ -343,6 +381,51 @@ fun ProfileScreen(
                 Icon(Icons.Default.ExitToApp, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(Localization.get("logout", currentLang), fontWeight = FontWeight.Bold)
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            var showDeleteConfirm by remember { mutableStateOf(false) }
+            
+            OutlinedButton(
+                onClick = { showDeleteConfirm = true },
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
+                border = BorderStroke(1.dp, Color.Red.copy(alpha = 0.5f)),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("profile_delete_btn")
+            ) {
+                Icon(Icons.Default.DeleteForever, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Delete My Account", fontWeight = FontWeight.Bold)
+            }
+            
+            if (showDeleteConfirm) {
+                AlertDialog(
+                    onDismissRequest = { showDeleteConfirm = false },
+                    title = { Text("Delete Account") },
+                    text = { Text("Are you sure you want to permanently delete your account? This action cannot be undone.") },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showDeleteConfirm = false
+                                scope.launch {
+                                    repository.deleteAccount()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                        ) {
+                            Text("Delete")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDeleteConfirm = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
             }
         }
         
